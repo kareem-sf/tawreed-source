@@ -51,7 +51,7 @@ jobs:
       - run: npm run package:service && npm run tauri -- build --config desktop/tauri.release.conf.json --config desktop/tauri.linux.conf.json
       - name: Package contents check
         run: dpkg-deb -c desktop/target/release/bundle/deb/*.deb | grep -q 'tawreed-service'
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: linux-deb
           path: desktop/target/release/bundle/deb/*.deb
@@ -79,7 +79,7 @@ jobs:
           sudo apt-get remove -y tawreed
           if dpkg -s tawreed 2>/dev/null | grep -q 'ok installed'; then echo 'tawreed is still installed'; exit 1; fi
       - if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: linux-smoke-evidence
           path: evidence
@@ -134,7 +134,7 @@ jobs:
           }
           $uninstall = Start-Process (Join-Path $home_dir 'uninstall.exe') -ArgumentList '/S' -Wait -PassThru
           if ($uninstall.ExitCode -ne 0) { throw "Uninstaller exited with $($uninstall.ExitCode)" }
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: windows-installer
           path: desktop/target/release/bundle/nsis/*-setup.exe
