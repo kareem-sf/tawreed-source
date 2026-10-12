@@ -17,8 +17,20 @@ concurrency:
   group: release-${{ github.ref }}
   cancel-in-progress: false
 jobs:
+  version:
+    name: Tag and version match
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - env:
+          TAG: ${{ inputs.tag || github.ref_name }}
+        run: node scripts/check-release-version.mjs "$TAG"
   linux:
     name: Linux deb
+    needs: [version]
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     steps:
@@ -45,8 +57,36 @@ jobs:
           path: desktop/target/release/bundle/deb/*.deb
           if-no-files-found: error
           retention-days: 7
+  linux-smoke:
+    name: Linux clean-install smoke test
+    needs: [linux]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      # Only the script and the synthetic fixture come from the source; the deb is installed on this fresh runner.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: linux-deb
+          path: deb
+      - name: Install, run and remove
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ./deb/*.deb
+          python3 scripts/linux-smoke.py --deb deb/*.deb --fixture service/tests/fixtures/boq-english.pdf --out evidence
+          sudo apt-get remove -y tawreed
+          if dpkg -s tawreed 2>/dev/null | grep -q 'ok installed'; then echo 'tawreed is still installed'; exit 1; fi
+      - if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: linux-smoke-evidence
+          path: evidence
+          retention-days: 7
   windows:
     name: Windows installer
+    needs: [version]
     runs-on: windows-2025
     timeout-minutes: 60
     steps:
@@ -102,7 +142,7 @@ jobs:
           retention-days: 7
   draft:
     name: Draft release
-    needs: [linux, windows]
+    needs: [linux, linux-smoke, windows]
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
@@ -112,6 +152,7 @@ jobs:
         with:
           path: dist
           merge-multiple: true
+          pattern: '{linux-deb,windows-installer}'
       - name: Checksums and draft
         env:
           GH_TOKEN: ${{ github.token }}

@@ -44,7 +44,39 @@ jobs:
       - run: npm run build
       - name: Compile Linux deb (verification only)
         run: npm run package:service && npm run tauri -- build --config desktop/tauri.release.conf.json --config desktop/tauri.linux.conf.json
-      # No fontless package is uploaded or published. See docs/github-actions.md.
+      # The deb is kept one day, only so the clean-machine smoke job can install it. It is never published.
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: linux-deb
+          path: desktop/target/release/bundle/deb/*.deb
+          if-no-files-found: error
+          retention-days: 1
+  linux-smoke:
+    name: Linux clean-install smoke test
+    needs: [verify]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: linux-deb
+          path: deb
+      - name: Install, run and remove
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ./deb/*.deb
+          python3 scripts/linux-smoke.py --deb deb/*.deb --fixture service/tests/fixtures/boq-english.pdf --out evidence
+          sudo apt-get remove -y tawreed
+          if dpkg -s tawreed 2>/dev/null | grep -q 'ok installed'; then echo 'tawreed is still installed'; exit 1; fi
+      - if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: linux-smoke-evidence
+          path: evidence
+          retention-days: 3
   desktop-windows:
     name: Windows Clippy
     runs-on: windows-latest
@@ -58,11 +90,12 @@ jobs:
   release-gate:
     name: Release gate
     if: always()
-    needs: [verify, desktop-windows]
+    needs: [verify, linux-smoke, desktop-windows]
     runs-on: ubuntu-24.04
     timeout-minutes: 2
     steps:
       - env:
           RESULT: ${{ needs.verify.result }}
+          SMOKE_RESULT: ${{ needs.linux-smoke.result }}
           WINDOWS_RESULT: ${{ needs.desktop-windows.result }}
-        run: test "$RESULT" = success && test "$WINDOWS_RESULT" = success
+        run: test "$RESULT" = success && test "$SMOKE_RESULT" = success && test "$WINDOWS_RESULT" = success
