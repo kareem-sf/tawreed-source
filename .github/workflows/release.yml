@@ -1,0 +1,124 @@
+name: Release
+# Builds the Linux deb and the Windows NSIS installer on GitHub-hosted runners and
+# stages them in a DRAFT release with SHA256SUMS. A person publishes the draft after
+# checking the sums. Fonts are never supplied here: these builds use the system Arabic
+# font. See docs/2026-10-12-clean-install-and-signing.md.
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag for the draft (for example v0.1.1)
+        required: true
+permissions:
+  contents: read
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  linux:
+    name: Linux deb
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: '24'
+          cache: npm
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: '3.12'
+      - run: sudo apt-get update && sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+      - run: python -m venv service/.venv && service/.venv/bin/pip install -e './service[dev]'
+      - run: npm ci
+      - run: npm run build
+      - run: npm run package:service && npm run tauri -- build --config desktop/tauri.release.conf.json --config desktop/tauri.linux.conf.json
+      - name: Package contents check
+        run: dpkg-deb -c desktop/target/release/bundle/deb/*.deb | grep -q 'tawreed-service'
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: linux-deb
+          path: desktop/target/release/bundle/deb/*.deb
+          if-no-files-found: error
+          retention-days: 7
+  windows:
+    name: Windows installer
+    runs-on: windows-2025
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: '24'
+          cache: npm
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: '3.12'
+      # One command per step: PowerShell only reports the last command's exit code in a step.
+      - run: python -m venv service/.venv
+      - run: service/.venv/Scripts/python -m pip install -e './service[dev]'
+      - run: npm ci
+      - run: npm run build
+      - run: npm run package:service
+      - run: npm run tauri -- build --config desktop/tauri.release.conf.json --config desktop/tauri.windows.conf.json
+      # A hosted Windows runner is a fresh machine, so this is a clean-install check: silent per-user install,
+      # start the installed service, ask /health, then uninstall.
+      - name: Clean install smoke test
+        shell: pwsh
+        run: |
+          $setup = (Get-ChildItem desktop/target/release/bundle/nsis/*-setup.exe).FullName
+          $install = Start-Process $setup -ArgumentList '/S' -Wait -PassThru
+          if ($install.ExitCode -ne 0) { throw "Installer exited with $($install.ExitCode)" }
+          $home_dir = Join-Path $env:LOCALAPPDATA 'Tawreed'
+          $service = Join-Path $home_dir 'service\tawreed-service.exe'
+          if (-not (Test-Path $service)) { throw "Missing $service" }
+          $env:TAWREED_TOKEN = 'smoke-test'
+          $env:TAWREED_HOME = Join-Path $env:RUNNER_TEMP 'tawreed-home'
+          $process = Start-Process $service -ArgumentList '--port', '18765' -PassThru -WindowStyle Hidden
+          try {
+            $ok = $false
+            foreach ($i in 1..60) {
+              try { $ok = (Invoke-RestMethod http://127.0.0.1:18765/health).status -eq 'ok' } catch { }
+              if ($ok) { break }
+              Start-Sleep -Seconds 1
+            }
+            if (-not $ok) { throw 'Installed service did not answer /health within 60 seconds' }
+          } finally {
+            Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
+          }
+          $uninstall = Start-Process (Join-Path $home_dir 'uninstall.exe') -ArgumentList '/S' -Wait -PassThru
+          if ($uninstall.ExitCode -ne 0) { throw "Uninstaller exited with $($uninstall.ExitCode)" }
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: windows-installer
+          path: desktop/target/release/bundle/nsis/*-setup.exe
+          if-no-files-found: error
+          retention-days: 7
+  draft:
+    name: Draft release
+    needs: [linux, windows]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Checksums and draft
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag || github.ref_name }}
+        run: |
+          cd dist
+          sha256sum * > SHA256SUMS
+          cat SHA256SUMS
+          gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --draft --title "$TAG" \
+            --notes "Unsigned installer builds; Arabic uses the system font. Check SHA256SUMS before publishing." *
