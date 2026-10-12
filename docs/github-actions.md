@@ -2,7 +2,7 @@
 
 The public source is `kareem-sf/tawreed-source`. Only reviewed files from the clean snapshot are used; the old private repository history must not be pushed here.
 
-CI runs on pull requests, main pushes and manual dispatch. Its read-only Ubuntu 24.04 job checks generated bindings, runs the full local verification, builds the UI and compiles a Linux deb for verification. Actions are pinned to commit SHAs. npm, pip and Cargo caches contain public dependencies and build output only. No fonts, credentials or customer data are supplied. No package artifact is uploaded by CI, so artifact retention is not applicable. The deb is not a user-accepted installer. The existing Windows Clippy check is preserved in a separate hosted job.
+CI runs on pull requests, main pushes and manual dispatch. Its read-only Ubuntu 24.04 job checks generated bindings, runs the full local verification, builds the UI and compiles a Linux deb for verification. Actions are pinned to commit SHAs. npm, pip and Cargo caches contain public dependencies and build output only. No fonts, credentials or customer data are supplied. CI uploads the compiled deb with one-day retention only so a second, clean runner can install it and run the headless smoke test (`scripts/linux-smoke.py`); it is never published. The deb is not a user-accepted installer, and the smoke test does not replace human Desktop acceptance. See `docs/release-runbook.md`. The existing Windows Clippy check is preserved in a separate hosted job.
 
 Concurrent runs on the same ref cancel older runs. Verification has a 30-minute limit; the two-minute Release gate fails unless Linux verification and Windows Clippy succeed. No self-hosted runners or paid runner types are used.
 
