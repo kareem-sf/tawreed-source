@@ -47,8 +47,8 @@ the desktop window. Set `TAWREED_HOME` to use another data folder, for example a
 | `npm run build` | Typecheck and production build of the interface into `dist/` |
 | `npm run bindings` | Regenerate the interface's API types from the service |
 
-Run `npm run verify` before every push. CI runs the same checks, and fails if the API types are out of date, only when
-started by hand (Actions → CI → Run workflow), to stay inside the free GitHub Actions minutes.
+Run `npm run verify` before every push. CI runs on pull requests, main pushes and manual dispatch. It checks API
+types, runs verification and compiles a Linux deb without publishing it. See [GitHub CI](docs/github-actions.md).
 
 ## Windows and Linux packages
 
